@@ -1,0 +1,364 @@
+~CODE_ADDRESS = 0x8000
+#moves the program from Cellular to Block RAM
+#bootloader
+#moves the program from Cellular to Block RAM
+
+  movi @a0, Bootloader_End # Address where program is stored in cellular RAM
+  movi @a1, 0x4000 # Address where program starts in Block RAM
+  movi @p0, 0x9100 # Addr for end of program in cellular RAM
+
+Loop:
+  cmp @a0, @p0  #Check if reached end of program in cellular RAM
+  bei 0x4000       # Go to Block RAM program start
+  load @p1, @a0     #load current cellular data into reg
+  store @p1, @a1    #store reg into Block RAM
+  inc @a0
+  inc @a1
+  ja Loop
+Bootloader_End:
+
+
+
+~CODE_ADDRESS = 0x4000
+#
+# @v0 will be the last_button pressed
+# @v1 will be the menu_index
+#
+
+######################################
+main:
+  movi @v0, 0 # Last button pressed will be 0
+  movi @v1, 0 # Menu index starts at 0
+  storei @v0, 0x7FFC #initialize memory at button_flag address
+  storei @v0, 0x7FFE #initialize memory at status op address
+  js clear_screen
+  js put_menu_options_into_VGA_memory
+  js draw_cursor
+
+
+Main_Loop:
+  loadi @v0, 0x7FFC #Get last button state
+  cmpi @v0, 0       #Check if no button was pressed
+  bei Main_Loop
+  cmpi @v0 5
+  bnei Not_select_button
+
+Select_button_pressed:
+  js select_button
+  movi @p0, 1       # Hardware will change this flag when done playing
+  storei @p0, 0x7FFE
+  js clear_screen
+  js print_stop_option
+Wait_to_end_op:
+  loadi @p0, 0x7FFE
+  cmpi @p0, 0
+  bei Clean_up_after_running_op
+  js change_screen_colors
+  ja Wait_to_end_op
+Clean_up_after_running_op:
+  js clear_screen
+  js put_menu_options_into_VGA_memory
+  js draw_cursor
+  ja Main_Loop_End
+
+
+Not_select_button:
+  js directional_buttons
+  ja Main_Loop_End
+
+Main_Loop_End:
+  movi @v0, 0
+  storei @v0, 0x7FFC
+  ja Main_Loop #Go back to start of program
+######################################
+
+######################################
+select_button:
+  movi @a0, 0x7FFF # Start op address
+  cmpi @v1, 0
+  bei Record
+  cmpi @v1, 1
+  bei Play_normal
+  cmpi @v1, 2
+  bei Play_fast
+  cmpi @v1, 3
+  bei Play_slow
+  ja Select_end
+
+Record:
+  movi @p0, 4
+  store @p0, @a0
+  ja Select_end
+
+Play_normal:
+  movi @p0, 1
+  store @p0, @a0
+  ja Select_end
+
+Play_fast:
+  movi @p0, 3
+  store @p0, @a0
+  ja Select_end
+
+Play_slow:
+  movi @p0, 2
+  store @p0, @a0
+  ja Select_end
+
+Select_end:
+  jr @ra
+######################################
+
+######################################
+directional_buttons:
+  cmpi @v0, 1 #check if button is up
+  bei Up_button
+  cmpi @v0, 4 #check if button is down
+  bei Down_button
+  ja Directional_buttons_end
+
+
+Up_button:
+  cmpi @v1, 0 #check if menu index is at min (top menu option is 0)
+  bltei Directional_buttons_end
+  subi @v1, 1
+  ja Update_menu
+
+Down_button:
+  movi @p0, 3 # We need to do this because we don't have a greater than instruction
+  cmp @p0, @v1 #check if menu index is at max (bottom menu option is max_index)
+  bltei Directional_buttons_end
+  inc @v1
+  ja Update_menu
+
+Update_menu:
+  mov @a0, @ra
+  js draw_cursor
+  mov @ra, @a0
+
+Directional_buttons_end:
+  jr @ra
+######################################
+
+######################################
+draw_cursor:
+  #Don't use reg @a0 or you'll break something!
+
+  #Erase options in menu
+  movi @a1, ' '
+  storei @a1, 0x0500
+  storei @a1, 0x0580
+  storei @a1, 0x0600
+  storei @a1, 0x0680
+
+  #Get menu index and draw new option
+  cmpi @v1, 0
+  bei Draw_record_cursor
+  cmpi @v1, 1
+  bei Draw_normal_cursor
+  cmpi @v1, 2
+  bei Draw_fast_cursor
+  cmpi @v1, 3
+  bei Draw_slow_cursor
+  ja Draw_end
+
+Draw_record_cursor:
+  movi @a1, 0x0500
+  ja Draw_end
+
+Draw_normal_cursor:
+  movi @a1, 0x0580
+  ja Draw_end
+
+Draw_fast_cursor:
+  movi @a1, 0x0600
+  ja Draw_end
+
+Draw_slow_cursor:
+  movi @a1, 0x0680
+  ja Draw_end
+
+Draw_end:
+  movi @p0, '>'
+  store @p0, @a1
+  jr @ra
+######################################
+
+######################################
+clear_screen:
+  movi @p0, 0x0000
+  movi @p1, 0x2000
+
+Clear_loop:
+  movi @p2, ' '
+  store @p2, @p0
+  inc @p0
+  cmp @p0, @p1
+  bnei Clear_loop
+  jr @ra
+######################################
+
+######################################
+change_screen_colors:
+  movi @a0, 0x0000 #Start of VGA text
+  movi @a1, 0x2000 #End of VGA text
+Color_loop:
+  cmp @a0, @a1
+  bei Color_end
+  load @p0, @a0 #Get the character
+  addi @p0, 0x0100 #add 1 to the color of the char
+  store @p0, @a0 #Save character back to memory
+  addi @a0, 2 #move to next character
+  ja Color_loop
+
+Color_end:
+  jr @ra
+######################################
+
+######################################
+print_stop_option:
+  movi @p0, 0x0500 #The start of drawable area in VGA memory
+  movi @p2, '>'
+  store @p2, @p0
+  inc @p0
+  movi @p2, 'S'
+  store @p2, @p0
+  inc @p0
+  movi @p2, 't'
+  store @p2, @p0
+  inc @p0
+  movi @p2, 'o'
+  store @p2, @p0
+  inc @p0
+  movi @p2, 'p'
+  store @p2, @p0
+
+  jr @ra
+######################################
+
+
+######################################
+put_menu_options_into_VGA_memory:
+  movi @p0, 0x0500 #The start of drawable area in VGA memory
+  movi @p2, ' '
+  store @p2, @p0
+  inc @p0
+  movi @p2, 'R'
+  store @p2, @p0
+  inc @p0
+  movi @p2, 'e'
+  store @p2, @p0
+  inc @p0
+  movi @p2, 'c'
+  store @p2, @p0
+  inc @p0
+  movi @p2, 'o'
+  store @p2, @p0
+  inc @p0
+  movi @p2, 'r'
+  store @p2, @p0
+  inc @p0
+  movi @p2, 'd'
+  store @p2, @p0
+
+  movi @p0, 0x0580 #The start of next line in VGA memory
+  movi @p2, ' '
+  store @p2, @p0
+  inc @p0
+  movi @p2, 'P'
+  store @p2, @p0
+  inc @p0
+  movi @p2, 'l'
+  store @p2, @p0
+  inc @p0
+  movi @p2, 'a'
+  store @p2, @p0
+  inc @p0
+  movi @p2, 'y'
+  store @p2, @p0
+  inc @p0
+  movi @p2, ' '
+  store @p2, @p0
+  inc @p0
+  movi @p2, 'N'
+  store @p2, @p0
+  inc @p0
+  movi @p2, 'o'
+  store @p2, @p0
+  inc @p0
+  movi @p2, 'r'
+  store @p2, @p0
+  inc @p0
+  movi @p2, 'm'
+  store @p2, @p0
+  inc @p0
+  movi @p2, 'a'
+  store @p2, @p0
+  inc @p0
+  movi @p2, 'l'
+  store @p2, @p0
+
+  movi @p0, 0x0600 #The start of next line in VGA memory
+  movi @p2, ' '
+  store @p2, @p0
+  inc @p0
+  movi @p2, 'P'
+  store @p2, @p0
+  inc @p0
+  movi @p2, 'l'
+  store @p2, @p0
+  inc @p0
+  movi @p2, 'a'
+  store @p2, @p0
+  inc @p0
+  movi @p2, 'y'
+  store @p2, @p0
+  inc @p0
+  movi @p2, ' '
+  store @p2, @p0
+  inc @p0
+  movi @p2, 'F'
+  store @p2, @p0
+  inc @p0
+  movi @p2, 'a'
+  store @p2, @p0
+  inc @p0
+  movi @p2, 's'
+  store @p2, @p0
+  inc @p0
+  movi @p2, 't'
+  store @p2, @p0
+
+  movi @p0, 0x0680 #The start of next line in VGA memory
+  movi @p2, ' '
+  store @p2, @p0
+  inc @p0
+  movi @p2, 'P'
+  store @p2, @p0
+  inc @p0
+  movi @p2, 'l'
+  store @p2, @p0
+  inc @p0
+  movi @p2, 'a'
+  store @p2, @p0
+  inc @p0
+  movi @p2, 'y'
+  store @p2, @p0
+  inc @p0
+  movi @p2, ' '
+  store @p2, @p0
+  inc @p0
+  movi @p2, 'S'
+  store @p2, @p0
+  inc @p0
+  movi @p2, 'l'
+  store @p2, @p0
+  inc @p0
+  movi @p2, 'o'
+  store @p2, @p0
+  inc @p0
+  movi @p2, 'w'
+  store @p2, @p0
+
+  jr @ra
+######################################
